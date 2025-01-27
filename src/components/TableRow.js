@@ -2,17 +2,28 @@
 import React from "react";
 import { Button, OverlayTrigger, Tooltip, ProgressBar } from "react-bootstrap";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faUpload, faTimes, faTrash, faDownload } from "@fortawesome/free-solid-svg-icons";
+import { faUpload, faPause, faPlay, faTrash, faDownload } from "@fortawesome/free-solid-svg-icons";
 import { downloadDataFromSupabase } from "../services/api";
 import styles from "./TableRow.module.css";
+import { toast } from "react-toastify";
 
 const TableRow = ({
   row,
   handleFileUpload,
   handleGenerateToken,
-  handleCancel,
+  handlePause,
+  handleResume,
   handleDeleteRow,
 }) => {
+  const handleDownload = async () => {
+    const success = await downloadDataFromSupabase(row.lote);
+    if (success) {
+      toast.success("✅ Download realizado e dados deletados do Supabase!");
+    } else {
+      toast.error("❌ Erro ao realizar download ou deletar dados.");
+    }
+  };
+
   return (
     <tr>
       <td>
@@ -40,7 +51,7 @@ const TableRow = ({
         <input type="text" className="form-control" value={row.higienizados} readOnly />
       </td>
       <td>
-        <input type="text" className="form-control" value={row.naoHigienizados} readOnly />
+        <input type="text" className="form-control" value={row.semRespostaAPI} readOnly />
       </td>
       <td>
         <ProgressBar
@@ -51,26 +62,41 @@ const TableRow = ({
         />
       </td>
       <td className="d-flex gap-2">
-        <OverlayTrigger overlay={<Tooltip>Iniciar Higienização</Tooltip>}>
-          <Button
-            variant="success"
-            size="sm"
-            onClick={() => handleGenerateToken(row.id)}
-            disabled={row.lote === "Sem arquivo" || row.processing}
-          >
-            <FontAwesomeIcon icon={faUpload} />
-          </Button>
-        </OverlayTrigger>
-        <OverlayTrigger overlay={<Tooltip>Cancelar Higienização</Tooltip>}>
-          <Button
-            variant="warning"
-            size="sm"
-            onClick={() => handleCancel(row.id)}
-            disabled={!row.processing}
-          >
-            <FontAwesomeIcon icon={faTimes} />
-          </Button>
-        </OverlayTrigger>
+        {row.processing ? (
+          <OverlayTrigger overlay={<Tooltip>Pausar Higienização</Tooltip>}>
+            <Button
+              variant="warning"
+              size="sm"
+              onClick={() => handlePause(row.id)}
+            >
+              <FontAwesomeIcon icon={faPause} />
+            </Button>
+          </OverlayTrigger>
+        ) : (
+          row.currentIndex > 0 && row.currentIndex < row.total ? (
+            <OverlayTrigger overlay={<Tooltip>Retomar Higienização</Tooltip>}>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => handleResume(row.id)}
+              >
+                <FontAwesomeIcon icon={faPlay} />
+              </Button>
+            </OverlayTrigger>
+          ) : (
+            <OverlayTrigger overlay={<Tooltip>Iniciar Higienização</Tooltip>}>
+              <Button
+                variant="success"
+                size="sm"
+                onClick={() => handleGenerateToken(row.id)}
+                disabled={row.lote === "Sem arquivo"}
+              >
+                <FontAwesomeIcon icon={faUpload} />
+              </Button>
+            </OverlayTrigger>
+          )
+        )}
+        
         <OverlayTrigger overlay={<Tooltip>Excluir Linha</Tooltip>}>
           <Button
             variant="danger"
@@ -81,11 +107,12 @@ const TableRow = ({
             <FontAwesomeIcon icon={faTrash} />
           </Button>
         </OverlayTrigger>
+        
         <OverlayTrigger overlay={<Tooltip>Baixar CSV</Tooltip>}>
           <Button
             variant="info"
             size="sm"
-            onClick={() => downloadDataFromSupabase(row.lote)}
+            onClick={handleDownload}
             disabled={row.processing || row.lote === "Sem arquivo"}
           >
             <FontAwesomeIcon icon={faDownload} />

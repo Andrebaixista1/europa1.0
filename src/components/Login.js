@@ -1,7 +1,7 @@
 // src/components/Login.js
 import React, { useState, useRef } from "react";
 import { Container, Form, Button, Card } from "react-bootstrap";
-import { ToastContainer, toast } from "react-toastify";
+import { ToastContainer, toast } from "react-toastify"; 
 import "react-toastify/dist/ReactToastify.css";
 import TableComponent from "./TableComponent";
 import { formatFileName } from "../utils/formatFileName";
@@ -10,6 +10,7 @@ import {
   generateToken,
   saveToSupabase,
   queryInssBalances,
+  deleteArquivoFromSupabase,
 } from "../services/api";
 
 function Login() {
@@ -21,15 +22,20 @@ function Login() {
   const processingRef = useRef({});
 
   const handleAddRow = () => {
+    if (tableData.length >= 10) {
+      toast.error("❌ Limite de 10 linhas atingido.");
+      return;
+    }
     const newRow = {
       id: uuidv4(),
       lote: "Sem arquivo",
       total: 0,
       higienizados: 0,
-      naoHigienizados: 0,
+      semRespostaAPI: 0,
       porcentagem: "0.00%",
-      fileContent: "",
+      fileContent: [],
       processing: false,
+      currentIndex: 0,
     };
     setTableData([...tableData, newRow]);
   };
@@ -40,8 +46,28 @@ function Login() {
       const reader = new FileReader();
       reader.readAsText(file);
       reader.onload = async (e) => {
-        const lines = e.target.result.split("\n").filter((line) => line.trim() !== "");
-        const totalLines = lines.length;
+        const allLines = e.target.result.split("\n").filter((line) => line.trim() !== "");
+        if (allLines.length < 2) {
+          toast.error("❌ Arquivo deve conter pelo menos duas linhas (cabeçalho e dados).");
+          return;
+        }
+        const header = allLines[0].split(";").map(col => col.trim().toLowerCase());
+        if (header.length !== 2 || 
+            !((header[0] === "cpf" && header[1] === "nb") || 
+              (header[0] === "nb" && header[1] === "cpf"))) {
+          toast.error("❌ O cabeçalho deve conter apenas duas colunas: 'cpf' e 'nb' em qualquer ordem.");
+          return;
+        }
+        const cpfIndex = header[0] === "cpf" ? 0 : 1;
+        const nbIndex = header[1] === "nb" ? 1 : 0;
+        const dataLines = allLines.slice(1).map(line => {
+          const cols = line.split(";").map(col => col.trim());
+          return {
+            cpf: cols[cpfIndex] || "",
+            nb: cols[nbIndex] || "",
+          };
+        });
+        const totalLines = dataLines.length;
         const loteNome = formatFileName(file.name);
 
         const updatedTable = tableData.map((row) =>
@@ -50,9 +76,10 @@ function Login() {
                 ...row,
                 lote: loteNome,
                 total: totalLines,
-                naoHigienizados: 0,
+                semRespostaAPI: 0,
                 porcentagem: "0.00%",
-                fileContent: lines,
+                fileContent: dataLines,
+                currentIndex: 0,
               }
             : row
         );
@@ -63,6 +90,11 @@ function Login() {
   };
 
   async function handleGenerateToken(id) {
+    if (!accessId || !password) {
+      toast.error("❌ Por favor, insira o Login (Email) e a Senha.");
+      return;
+    }
+
     const credentials = {
       accessId,
       password,
@@ -98,81 +130,95 @@ function Login() {
       toast.error("❌ Linha não encontrada!");
       return;
     }
-  
+
     const lines = row.fileContent;
     let higienizados = row.higienizados;
-    let naoHigienizados = row.naoHigienizados;
-    let processed = row.higienizados + row.naoHigienizados;
-  
+    let semRespostaAPI = row.semRespostaAPI;
+    let processed = higienizados + semRespostaAPI;
+    let currentIndex = row.currentIndex;
+
     async function processLine(i) {
       if (!processingRef.current[id]) {
         toast.dismiss(`higienizacao-${id}`);
         setTableData((prevData) =>
           prevData.map((row) =>
-            row.id === id ? { ...row, processing: false } : row
+            row.id === id ? { ...row, processing: false, currentIndex } : row
           )
         );
         return;
       }
-  
+
       if (i >= lines.length || !lines[i]) {
         toast.dismiss(`higienizacao-${id}`);
         toast.success("✅ Processamento concluído!");
         processingRef.current[id] = false;
         setTableData((prevData) =>
           prevData.map((row) =>
-            row.id === id ? { ...row, processing: false } : row
+            row.id === id ? { ...row, processing: false, currentIndex: i } : row
           )
         );
         return;
       }
-  
-      const columns = lines[i].split(";");
-      const cpf = columns[0]?.trim();
-      const nb = columns[1]?.trim();
+
+      const { cpf, nb } = lines[i];
 
       if (!cpf || cpf.length !== 11 || !nb || nb.length < 10) {
-        naoHigienizados++;
+        semRespostaAPI++;
+        console.log(`Linha ${i + 2} inválida: CPF ou NB inválidos.`);
       } else {
         try {
           const response = await queryInssBalances(cpf, nb, token);
 
+          console.log(`Resposta da API para CPF: ${cpf}, NB: ${nb}:`, response.data);
+
           if (response.status === 200) {
-            higienizados++;
-            await saveToSupabase(response.data, row.lote);
+            const dados = response.data;
+            const hasName = dados.name && dados.name.trim() !== "";
+
+            if (hasName) {
+              higienizados++;
+              console.log("Dados válidos para salvar:", dados);
+              await saveToSupabase(dados, row.lote);
+            } else {
+              semRespostaAPI++;
+              console.log(`Linha ${i + 2} inválida: Resposta da API faltando 'name'.`);
+            }
           } else {
-            naoHigienizados++;
+            semRespostaAPI++;
+            console.log(`Linha ${i + 2} inválida: Status da API não é 200.`);
           }
         } catch (error) {
-          naoHigienizados++;
+          semRespostaAPI++;
+          console.error(`Erro ao consultar INSS para CPF: ${cpf}, NB: ${nb}:`, error.message);
         }
       }
 
-  
       processed++;
+      currentIndex = i + 1;
+
       const porcentagem = ((processed / row.total) * 100).toFixed(2) + "%";
-  
+
       setTableData((prevData) =>
         prevData.map((r) =>
           r.id === id
             ? {
                 ...r,
                 higienizados,
-                naoHigienizados,
+                semRespostaAPI,
                 porcentagem,
+                currentIndex,
               }
             : r
         )
       );
-  
-      timeoutsRef.current[id] = setTimeout(() => processLine(i + 1), 1000);
-    }
-  
-    processLine(0);
-  }
-  
 
-  const handleCancel = (id) => {
+      timeoutsRef.current[id] = setTimeout(() => processLine(currentIndex), 1000);
+    }
+
+    processLine(currentIndex);
+  }
+
+  const handlePause = (id) => {
     if (timeoutsRef.current[id]) {
       clearTimeout(timeoutsRef.current[id]);
       delete timeoutsRef.current[id];
@@ -183,11 +229,48 @@ function Login() {
         row.id === id ? { ...row, processing: false } : row
       )
     );
-    toast.warning("⏹️ Processamento cancelado!");
+    toast.warning("⏸️ Processamento pausado!");
   };
 
-  const handleDeleteRow = (id) => {
-    handleCancel(id);
+  const handleResume = (id) => {
+    const row = tableData.find((row) => row.id === id);
+    if (!row) return;
+
+    if (processingRef.current[id]) {
+      toast.info("🔄 Já está processando.");
+      return;
+    }
+
+    if (row.currentIndex >= row.total) {
+      toast.info("✅ Já concluiu o processamento.");
+      return;
+    }
+
+    toast.info("🔄 Retomando Higienização...", {
+      autoClose: true,
+      toastId: `higienizacao-${id}`,
+    });
+    processingRef.current[id] = true;
+    setTableData((prevData) =>
+      prevData.map((r) =>
+        r.id === id ? { ...r, processing: true } : r
+      )
+    );
+    processFile(id, tokenQuali);
+  };
+
+  const handleDeleteRow = async (id) => {
+    const row = tableData.find((row) => row.id === id);
+    if (row && row.lote !== "Sem arquivo") {
+      try {
+        await deleteArquivoFromSupabase(row.lote);
+        toast.success("🗑️ Arquivo excluído do banco de dados!");
+      } catch (error) {
+        toast.error("❌ Erro ao excluir arquivo do banco de dados!");
+        console.error("Erro ao excluir do Supabase:", error.message);
+      }
+    }
+    handlePause(id);
     setTableData((prevData) => prevData.filter((row) => row.id !== id));
     toast.error("🗑️ Linha removida!");
   };
@@ -219,9 +302,19 @@ function Login() {
               />
             </Form.Group>
 
-            <Button className="mt-4 w-100" variant="primary" onClick={handleAddRow}>
+            <Button
+              className="mt-4 w-100"
+              variant="primary"
+              onClick={handleAddRow}
+              disabled={tableData.length >= 10}
+            >
               + Adicionar
             </Button>
+            {tableData.length >= 10 && (
+              <Form.Text className="text-danger">
+                Limite de 10 linhas atingido.
+              </Form.Text>
+            )}
           </Form>
         </Card>
       </div>
@@ -232,7 +325,8 @@ function Login() {
             tableData={tableData}
             handleFileUpload={handleFileUpload}
             handleGenerateToken={handleGenerateToken}
-            handleCancel={handleCancel}
+            handlePause={handlePause}
+            handleResume={handleResume}
             handleDeleteRow={handleDeleteRow}
           />
         )}

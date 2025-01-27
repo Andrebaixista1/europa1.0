@@ -6,7 +6,13 @@
     align-items: center;
     text-align: center;
   }
-  
+  /* src/components/TableRow.module.css */
+/* Adicione qualquer estilo personalizado necessário para TableRow, se aplicável */
+.customProgress {
+  /* Exemplo de estilização */
+  height: 20px;
+}
+
   .customProgress {
     height: 20px;
   }
