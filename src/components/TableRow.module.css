@@ -1,0 +1,13 @@
+/* src/components/TableRow.module.css */
+
+.customProgress .progress-bar {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+  }
+  
+  .customProgress {
+    height: 20px;
+  }
+  
