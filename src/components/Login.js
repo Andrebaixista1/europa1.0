@@ -478,7 +478,8 @@ function Login() {
               }}
             />
             <div>
-              <strong>Status da API:</strong> {apiStatusText} (Verificando {secondsLeft}s)
+              {/* <strong>Status da API:</strong> {apiStatusText} (Verificando {secondsLeft}s) */}
+              <strong>Status da API:</strong> {apiStatusText}
             </div>
           </div>
           {/* -------------- FIM DA FAIXA DE STATUS DA API -------------- */}
